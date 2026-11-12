@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>位移加密器</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #172033; background: #f3f6fb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 32px 16px; }
+    main { width: min(760px, 100%); margin: 0 auto; padding: 28px; background: #fff; border-radius: 18px; box-shadow: 0 12px 36px #17203314; }
+    h1 { margin: 0 0 8px; font-size: 1.8rem; }
+    .intro, .hint { color: #667085; }
+    label { display: block; margin: 18px 0 8px; font-weight: 650; }
+    textarea, input { width: 100%; padding: 12px 14px; border: 1px solid #d0d5dd; border-radius: 10px; font: inherit; }
+    textarea { min-height: 140px; resize: vertical; }
+    textarea:focus, input:focus { outline: 3px solid #4678f533; border-color: #4678f5; }
+    .controls { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr); gap: 16px; align-items: end; }
+    .shift-control { display: flex; gap: 8px; align-items: center; }
+    .shift-control input { max-width: 120px; }
+    .buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+    button { border: 0; border-radius: 10px; padding: 11px 16px; background: #315eea; color: white; font: inherit; font-weight: 650; cursor: pointer; }
+    button.secondary { background: #e9eefc; color: #243b80; }
+    button:hover { filter: brightness(.96); }
+    .result { min-height: 90px; background: #f8f9fc; }
+    .panel { margin-top: 20px; padding: 16px; border: 1px solid #e4e7ec; border-radius: 12px; }
+    .panel h2 { margin: 0 0 10px; font-size: 1.1rem; }
+    .stats { line-height: 1.8; overflow-wrap: anywhere; }
+    .bar-row { display: grid; grid-template-columns: 24px 1fr 42px; gap: 8px; align-items: center; margin: 5px 0; font-size: .9rem; }
+    .bar { height: 10px; background: #edf0f5; border-radius: 10px; overflow: hidden; }
+    .bar > span { display: block; height: 100%; background: #6684f2; }
+    .status { min-height: 1.5em; margin-top: 10px; color: #b42318; }
+    @media (max-width: 560px) { main { padding: 20px; } .controls { grid-template-columns: 1fr; gap: 0; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>位移加密器</h1>
+    <p class="intro">使用经典 Caesar 位移密码对英文字母进行加密、解密，并查看字母频率。非英文字母会原样保留。</p>
+
+    <label for="inputText">输入文本</label>
+    <textarea id="inputText" placeholder="请输入要加密或分析的英文文本……"></textarea>
+
+    <div class="controls">
+      <div>
+        <label for="shift">位移量（0–25）</label>
+        <div class="shift-control">
+          <input id="shift" type="number" min="0" max="25" value="3" inputmode="numeric">
+          <span class="hint">例如：3 表示 A → D</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="buttons">
+      <button id="encryptBtn" type="button">加密</button>
+      <button id="decryptBtn" type="button">解密</button>
+      <button id="analyzeBtn" class="secondary" type="button">分析频率 / 猜测位移</button>
+      <button id="clearBtn" class="secondary" type="button">清空</button>
+    </div>
+
+    <label for="outputText">结果</label>
+    <textarea id="outputText" class="result" readonly placeholder="加密或解密结果会显示在这里"></textarea>
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+
+    <section class="panel" aria-labelledby="frequencyTitle">
+      <h2 id="frequencyTitle">字母频率</h2>
+      <div id="frequency" class="stats">输入文本后，点击“分析频率 / 猜测位移”。</div>
+    </section>
+    <section class="panel" aria-labelledby="bestShiftTitle">
+      <h2 id="bestShiftTitle">最佳位移猜测</h2>
+      <div id="best-shift" class="stats">此工具针对英文文本，使用常见英文频率作简单猜测；结果不保证正确。</div>
+    </section>
+  </main>
+
+  <script>
+    const input = document.getElementById('inputText');
+    const output = document.getElementById('outputText');
+    const shiftInput = document.getElementById('shift');
+    const status = document.getElementById('status');
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    // Approximate English letter frequencies, indexed A through Z.
+    const englishFrequencies = [0.08167,0.01492,0.02782,0.04253,0.12702,0.02228,0.02015,0.06094,0.06966,0.00153,0.00772,0.04025,0.02406,0.06749,0.07507,0.01929,0.00095,0.05987,0.06327,0.09056,0.02758,0.00978,0.02360,0.00150,0.01974,0.00074];
+
+    function getShift() {
+      const value = Number(shiftInput.value);
+      if (!Number.isInteger(value) || value < 0 || value > 25) {
+        status.textContent = '位移量必须是 0 到 25 之间的整数。';
+        shiftInput.focus();
+        return null;
+      }
+      status.textContent = '';
+      return value;
+    }
+
+    function caesar(text, shift) {
+      return Array.from(text, character => {
+        const code = character.charCodeAt(0);
+        if (code >= 65 && code <= 90) return String.fromCharCode((code - 65 + shift + 26) % 26 + 65);
+        if (code >= 97 && code <= 122) return String.fromCharCode((code - 97 + shift + 26) % 26 + 97);
+        return character;
+      }).join('');
+    }
+
+    function renderFrequency(text) {
+      const counts = Array(26).fill(0);
+      let total = 0;
+      for (const char of text.toUpperCase()) {
+        const index = alphabet.indexOf(char);
+        if (index >= 0) { counts[index]++; total++; }
+      }
+      const target = document.getElementById('frequency');
+      if (!total) {
+        target.textContent = '没有找到可分析的英文字母。';
+        return counts;
+      }
+      target.innerHTML = counts.map((count, i) => {
+        const percent = count / total * 100;
+        return `<div class="bar-row"><strong>${alphabet[i]}</strong><div class="bar"><span style="width:${percent.toFixed(2)}%"></span></div><span>${percent.toFixed(1)}%</span></div>`;
+      }).join('');
+      return counts;
+    }
+
+    function guessShift(text) {
+      const cipherCounts = Array(26).fill(0);
+      let total = 0;
+      for (const char of text.toUpperCase()) {
+        const index = alphabet.indexOf(char);
+        if (index >= 0) { cipherCounts[index]++; total++; }
+      }
+      if (!total) {
+        document.getElementById('best-shift').textContent = '没有找到可分析的英文字母。';
+        return;
+      }
+      let best = { shift: 0, score: Infinity };
+      for (let shift = 0; shift < 26; shift++) {
+        let score = 0;
+        for (let i = 0; i < 26; i++) {
+          const observed = cipherCounts[(i + shift) % 26] / total;
+          const difference = observed - englishFrequencies[i];
+          score += difference * difference / englishFrequencies[i];
+        }
+        if (score < best.score) best = { shift, score };
+      }
+      const plaintext = caesar(text, -best.shift);
+      document.getElementById('best-shift').innerHTML = `建议解密位移：<strong>${best.shift}</strong>（将密文向后移 ${best.shift} 位）<br>猜测明文：<br><code></code>`;
+      document.querySelector('#best-shift code').textContent = plaintext;
+      shiftInput.value = best.shift;
+    }
+
+    document.getElementById('encryptBtn').addEventListener('click', () => {
+      const shift = getShift();
+      if (shift !== null) output.value = caesar(input.value, shift);
+    });
+    document.getElementById('decryptBtn').addEventListener('click', () => {
+      const shift = getShift();
+      if (shift !== null) output.value = caesar(input.value, -shift);
+    });
+    document.getElementById('analyzeBtn').addEventListener('click', () => {
+      renderFrequency(input.value);
+      guessShift(input.value);
+      status.textContent = '';
+    });
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      input.value = '';
+      output.value = '';
+      document.getElementById('frequency').textContent = '输入文本后，点击“分析频率 / 猜测位移”。';
+      document.getElementById('best-shift').textContent = '此工具针对英文文本，使用常见英文频率作简单猜测；结果不保证正确。';
+      status.textContent = '';
+      input.focus();
+    });
+  </script>
+</body>
+</html>
